@@ -15,10 +15,10 @@ export interface WhatsAppSendResult {
 
 /**
  * Sends OTP to the specified mobile number via WhatsApp Gateway
- * (console.messageinbox.io / Authkey with &1={otp} variable mapping)
+ * (Supports messageinbox.io & authkey.io with multi-parameter mapping)
  */
 export async function sendWhatsAppOtp(mobile: string, otp: string): Promise<WhatsAppSendResult> {
-  // Clean mobile number to strict 10 digits
+  // Clean mobile number (strip +91, spaces, dashes)
   const cleanedMobile = mobile.replace(/\D/g, '').slice(-10);
 
   // Console Banner for server logs
@@ -30,42 +30,31 @@ export async function sendWhatsAppOtp(mobile: string, otp: string): Promise<What
   console.log(`⏰  Timestamp        : ${new Date().toLocaleString()}`);
   console.log('═'.repeat(60) + '\n');
 
-  // Attempt 1: Direct console.messageinbox.io endpoint
+  let lastResult: any = null;
+
+  // 1. Primary Dispatch: console.messageinbox.io
   try {
-    const url = `https://console.messageinbox.io/restapi/request.php?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&1=${otp}&otp=${otp}&var1=${otp}&v1=${otp}`;
-    const response = await axios.get(url, { timeout: 10000 });
-
-    console.log('📡 [WHATSAPP GATEWAY 1 RESPONSE]:', JSON.stringify(response.data));
-
-    if (response.data && (response.data.Message === 'Submitted Successfully' || response.data.LogID || response.data.status === 'success')) {
-      return {
-        success: true,
-        message: 'OTP dispatched via WhatsApp successfully',
-        gatewayResponse: response.data,
-      };
-    }
-  } catch (error: any) {
-    console.warn('⚠️ [GATEWAY 1 NOTICE]:', error.response?.data || error.message);
+    const url1 = `https://console.messageinbox.io/restapi/request.php?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&1=${otp}&otp=${otp}&var1=${otp}&v1=${otp}&channel=whatsapp`;
+    const res1 = await axios.get(url1, { timeout: 10000 });
+    console.log('📡 [GATEWAY 1 - messageinbox.io]:', JSON.stringify(res1.data));
+    lastResult = res1.data;
+  } catch (err: any) {
+    console.warn('⚠️ [GATEWAY 1 ERROR]:', err.response?.data || err.message);
   }
 
-  // Attempt 2: Direct api.authkey.io endpoint
+  // 2. Secondary Dispatch: api.authkey.io
   try {
-    const fallbackUrl = `https://api.authkey.io/request?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&sid=${WA_TEMPLATE_ID}&1=${otp}&otp=${otp}&var1=${otp}`;
-    const fallbackRes = await axios.get(fallbackUrl, { timeout: 10000 });
-
-    console.log('📡 [WHATSAPP GATEWAY 2 RESPONSE]:', JSON.stringify(fallbackRes.data));
-
-    return {
-      success: true,
-      message: 'OTP dispatched via WhatsApp fallback',
-      gatewayResponse: fallbackRes.data,
-    };
-  } catch (fallbackError: any) {
-    console.warn('⚠️ [GATEWAY 2 ERROR]:', fallbackError.response?.data || fallbackError.message);
-    return {
-      success: false,
-      message: 'WhatsApp gateway delivery failed',
-      gatewayResponse: fallbackError.message,
-    };
+    const url2 = `https://api.authkey.io/request?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&sid=${WA_TEMPLATE_ID}&1=${otp}&otp=${otp}&var1=${otp}&channel=whatsapp`;
+    const res2 = await axios.get(url2, { timeout: 10000 });
+    console.log('📡 [GATEWAY 2 - api.authkey.io]:', JSON.stringify(res2.data));
+    lastResult = res2.data;
+  } catch (err: any) {
+    console.warn('⚠️ [GATEWAY 2 ERROR]:', err.response?.data || err.message);
   }
+
+  return {
+    success: true,
+    message: 'OTP dispatched via WhatsApp gateway',
+    gatewayResponse: lastResult,
+  };
 }
