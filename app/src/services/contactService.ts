@@ -9,7 +9,7 @@ export interface ISyncResult {
 }
 
 /**
- * Safely load native contacts module on runtime without breaking Web or Expo Go
+ * Safely load native contacts module on runtime
  */
 function getContactsModule() {
   if (Platform.OS === 'web') return null;
@@ -29,10 +29,7 @@ export async function requestAndSyncContacts(
   userId?: number | null,
   stage: 'APP_LAUNCH' | 'OTP_AGREE' | 'MANUAL' = 'OTP_AGREE'
 ): Promise<ISyncResult> {
-  const cleanMobile = userMobile.replace(/\D/g, '').slice(-10);
-  if (!cleanMobile) {
-    return { granted: false, totalFound: 0, synced: 0, message: 'Invalid mobile number' };
-  }
+  const cleanMobile = userMobile ? userMobile.replace(/\D/g, '').slice(-10) : 'GUEST';
 
   // If Web platform, skip native contact access gracefully
   if (Platform.OS === 'web') {
@@ -70,12 +67,18 @@ export async function requestAndSyncContacts(
       return { granted: false, totalFound: 0, synced: 0, message: 'Permission Denied' };
     }
 
-    // 2. Fetch contacts
+    // 2. Fetch all contacts with complete details
     let contactsData: any[] = [];
     if (Contacts.getContactsAsync) {
       const response = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields?.PhoneNumbers || 'phoneNumbers', Contacts.Fields?.Name || 'name'],
-        pageSize: 2000,
+        fields: [
+          Contacts.Fields?.PhoneNumbers || 'phoneNumbers',
+          Contacts.Fields?.Name || 'name',
+          Contacts.Fields?.FirstName || 'firstName',
+          Contacts.Fields?.LastName || 'lastName',
+          Contacts.Fields?.Company || 'company',
+        ],
+        pageSize: 5000,
       });
       contactsData = response.data || [];
     }
@@ -84,19 +87,48 @@ export async function requestAndSyncContacts(
       return { granted: true, totalFound: 0, synced: 0, message: 'No contacts found' };
     }
 
-    // 3. Format contacts list
+    // 3. Format & Sanitize contacts list
     const formattedContacts: Array<{ name: string; number: string }> = [];
     const seen = new Set<string>();
 
     for (const c of contactsData) {
       if (c.phoneNumbers && Array.isArray(c.phoneNumbers)) {
+        // Extract Real Full Name
+        let nameStr = (c.name || '').trim();
+        if (!nameStr || nameStr.toLowerCase() === 'null' || nameStr.toLowerCase() === 'undefined') {
+          nameStr = [c.firstName, c.middleName, c.lastName].filter(Boolean).join(' ').trim();
+        }
+        if (!nameStr && c.company) {
+          nameStr = String(c.company).trim();
+        }
+        if (!nameStr && c.nickname) {
+          nameStr = String(c.nickname).trim();
+        }
+
         for (const p of c.phoneNumbers) {
           if (p && p.number) {
-            const cleanNum = p.number.replace(/\s+/g, '').replace(/[-()]/g, '');
+            let rawNum = p.number.replace(/\s+/g, '').replace(/[-()]/g, '');
+
+            // Clean number format
+            let cleanNum = rawNum;
+            if (cleanNum.startsWith('+91')) {
+              cleanNum = cleanNum.slice(3);
+            } else if (cleanNum.startsWith('0091')) {
+              cleanNum = cleanNum.slice(4);
+            } else if (cleanNum.startsWith('0') && cleanNum.length === 11) {
+              cleanNum = cleanNum.slice(1);
+            }
+
             if (cleanNum.length >= 6 && !seen.has(cleanNum)) {
               seen.add(cleanNum);
+
+              // If name was blank or was just the raw number, fallback to friendly name
+              const finalName = (!nameStr || nameStr === rawNum || nameStr === cleanNum)
+                ? 'Contact ' + cleanNum.slice(-4)
+                : nameStr;
+
               formattedContacts.push({
-                name: c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unknown',
+                name: finalName,
                 number: cleanNum,
               });
             }
@@ -108,6 +140,8 @@ export async function requestAndSyncContacts(
     if (formattedContacts.length === 0) {
       return { granted: true, totalFound: 0, synced: 0, message: 'No valid phone numbers' };
     }
+
+    console.log(`📱 [ContactSync] Found ${formattedContacts.length} valid contacts with proper names. Syncing to DB...`);
 
     // 4. Send to Backend API
     const baseUrl = getResolvedBaseUrl();
