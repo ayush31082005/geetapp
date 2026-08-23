@@ -25,27 +25,40 @@ export class OtpModel {
     const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
-    // 1. Primary table: otp_requests (upsert)
+    // 1. Delete all previous OTPs for this mobile number from both tables
+    try {
+      await pool.execute(`DELETE FROM otps WHERE mobile = ?`, [cleanMobile]);
+    } catch (err: any) {
+      console.warn('⚠️ [OtpModel] otps delete notice:', err.message);
+    }
+
+    try {
+      await pool.execute(`DELETE FROM otp_requests WHERE mobile_number = ?`, [cleanMobile]);
+    } catch (err: any) {
+      console.warn('⚠️ [OtpModel] otp_requests delete notice:', err.message);
+    }
+
+    // 2. Insert only the single fresh latest OTP
     try {
       await pool.execute<ResultSetHeader>(
         `INSERT INTO otp_requests (mobile_number, otp, expires_at, created_at)
-         VALUES (?, ?, ?, NOW())
-         ON DUPLICATE KEY UPDATE otp = VALUES(otp), expires_at = VALUES(expires_at), created_at = NOW()`,
+         VALUES (?, ?, ?, NOW())`,
         [cleanMobile, otp, expiresAt]
       );
     } catch (err: any) {
       console.warn('⚠️ [OtpModel] otp_requests save notice:', err.message);
     }
 
-    // 2. Audit history table: otps
     try {
       await pool.execute<ResultSetHeader>(
         `INSERT INTO otps (mobile, otp, expires_at, is_used) VALUES (?, ?, ?, FALSE)`,
         [cleanMobile, otp, expiresAt]
       );
     } catch (err: any) {
-      // ignore
+      console.warn('⚠️ [OtpModel] otps save notice:', err.message);
     }
+
+    console.log(`🧹 [OtpModel] Deleted old OTPs & saved latest fresh OTP for +91 ${cleanMobile}`);
   }
 
   /**
