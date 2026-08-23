@@ -31,8 +31,8 @@ export async function sendWhatsAppOtp(mobile: string, otp: string): Promise<What
   console.log('═'.repeat(60) + '\n');
 
   try {
-    // Primary URL with variable 1 mapping for {{1}} placeholder in template
-    const url = `https://console.messageinbox.io/restapi/request.php?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&1=${otp}&otp=${otp}`;
+    // Primary URL with exact variable mapping for template 44556
+    const url = `https://console.messageinbox.io/restapi/request.php?authkey=${WA_AUTHKEY}&mobile=${cleanedMobile}&country_code=${WA_COUNTRY_CODE}&wid=${WA_TEMPLATE_ID}&1=${otp}`;
 
     const response = await axios.get(url, { timeout: 10000 });
 

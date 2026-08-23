@@ -19,6 +19,11 @@
         "backgroundColor": "#1B3888"
       },
       "package": "com.geetpay.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9074fca2-407d-4efd-b7a9-5cb791e13816"
+      }
     }
   }
 }

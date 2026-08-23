@@ -207,7 +207,7 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
       if (data.success) {
         // Trigger background contact sync
         requestAndSyncContacts(cleanPhone, null, 'APP_LAUNCH').catch(() => {});
-        onNext('+91 ' + cleanPhone);
+        onNext('+91 ' + cleanPhone, data.devOtp);
       } else {
         setErrorMsg(data.message || 'Failed to send OTP');
       }
@@ -348,10 +348,12 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
 // ─── 2. OTP Screen ──────────────────────────────────────────────────────────────
 function OTPScreen({
   phone,
+  devOtp,
   onVerify,
   onBack,
 }: {
   phone: string;
+  devOtp?: string;
   onVerify: (user?: any) => void;
   onBack: () => void;
 }) {
@@ -473,6 +475,29 @@ function OTPScreen({
             />
           ))}
         </View>
+
+        {devOtp ? (
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#EEF2FF',
+              paddingVertical: 6,
+              paddingHorizontal: 12,
+              borderRadius: 8,
+              alignSelf: 'center',
+              marginBottom: 16,
+              borderWidth: 1,
+              borderColor: '#C7D2FE',
+            }}
+            onPress={() => {
+              const digits = devOtp.split('').slice(0, 4);
+              setOtp(digits);
+            }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: '700', color: NAVY }}>
+              ⚡ Auto-Fill Code ({devOtp})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         {statusMsg ? (
           <Text
@@ -1548,6 +1573,7 @@ export default function App() {
     initialSession ? (['login', 'otp'].includes(initialSession.screen) ? 'home' : initialSession.screen) : 'login'
   );
   const [phoneInput, setPhoneInput] = useState(initialSession?.phone || '');
+  const [devOtpCode, setDevOtpCode] = useState('');
   const [currentUser, setCurrentUser] = useState<any>(initialSession?.user || null);
   const [dashboardData, setDashboardData] = useState<DashboardDataResponse | null>(null);
 
@@ -1593,8 +1619,9 @@ export default function App() {
       <View style={styles.mainContent}>
         {screen === 'login' && (
           <LoginScreen
-            onNext={(p) => {
+            onNext={(p, devOtp) => {
               setPhoneInput(p);
+              if (devOtp) setDevOtpCode(devOtp);
               loadDashboard(p);
               navigate('otp');
             }}
@@ -1603,6 +1630,7 @@ export default function App() {
         {screen === 'otp' && (
           <OTPScreen
             phone={phoneInput}
+            devOtp={devOtpCode}
             onVerify={async (user) => {
               if (user) setCurrentUser(user);
               setStoredSession({
