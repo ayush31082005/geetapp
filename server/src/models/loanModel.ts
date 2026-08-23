@@ -1,0 +1,441 @@
+import { pool } from '../config/db.js';
+
+export interface IDashboardLoanData {
+  user: {
+    id: number;
+    name: string;
+    phone: string;
+    email: string;
+    avatar?: string | null;
+    pan?: string;
+    aadhaar?: string;
+    employer?: string;
+    salary?: number;
+    creditScore: number;
+    creditRating: string;
+    creditDesc: string;
+    bank?: string;
+    upi?: string;
+  };
+  loan: {
+    id: string;
+    leadId: string;
+    status: string;
+    amount: number;
+    processingFee: number;
+    gst: number;
+    disbursed: number;
+    dailyRate: number;
+    startDate: string;
+    dueDate: string;
+    totalDays: number;
+    elapsed: number;
+    remaining: number;
+    interest: number;
+    outstanding: number;
+    hasActiveLoan: boolean;
+  };
+  history: Array<{
+    id: string;
+    amount: number;
+    date: string;
+    repaid: string;
+    status: string;
+    paid: number;
+    duration: number;
+  }>;
+  transactions: Array<{
+    id?: string | number;
+    label: string;
+    sublabel?: string;
+    amount: number;
+    date: string;
+    credit: boolean;
+    category?: string;
+  }>;
+}
+
+export class LoanModel {
+  /**
+   * Fetch real disbursed loan, CAM, banking, Aadhaar photo, repayments, and profile data from MySQL
+   */
+  static async getDisbursedLoanDetails(userIdOrMobile: number | string): Promise<IDashboardLoanData> {
+    let userId: number | null = null;
+    let mobile = '';
+
+    if (typeof userIdOrMobile === 'number' || (!isNaN(Number(userIdOrMobile)) && userIdOrMobile.toString().length < 10)) {
+      userId = Number(userIdOrMobile);
+      const [uRows]: any = await pool.execute(`SELECT mobile_number FROM users WHERE id = ? LIMIT 1`, [userId]);
+      if (uRows && uRows.length > 0) mobile = uRows[0].mobile_number;
+    } else {
+      mobile = userIdOrMobile.toString().replace(/\D/g, '').slice(-10);
+      const [uRows]: any = await pool.execute(`SELECT id FROM users WHERE mobile_number = ? LIMIT 1`, [mobile]);
+      if (uRows && uRows.length > 0) userId = uRows[0].id;
+    }
+
+    if (!userId) {
+      return {
+        user: {
+          id: 0,
+          name: 'GeetPay Customer',
+          phone: '+91 ' + (mobile || '0000000000'),
+          email: 'customer@geetpay.com',
+          avatar: null,
+          creditScore: 0,
+          creditRating: 'Not Generated',
+          creditDesc: 'Apply for loan to generate your instant credit score',
+          bank: 'No Bank Linked',
+        },
+        loan: {
+          id: '',
+          leadId: '',
+          status: 'NO_LOAN',
+          amount: 0,
+          processingFee: 0,
+          gst: 0,
+          disbursed: 0,
+          dailyRate: 1,
+          startDate: '',
+          dueDate: '',
+          totalDays: 0,
+          elapsed: 0,
+          remaining: 0,
+          interest: 0,
+          outstanding: 0,
+          hasActiveLoan: false,
+        },
+        history: [],
+        transactions: [],
+      };
+    }
+
+    try {
+      // 1. Fetch User Profile
+      const [profileRows]: any = await pool.execute(
+        `SELECT * FROM user_profiles WHERE user_id = ? LIMIT 1`,
+        [userId]
+      );
+      const profile = profileRows[0] || {};
+
+      // 2. Fetch Bank Details
+      const [bankRows]: any = await pool.execute(
+        `SELECT * FROM bank_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const bank = bankRows[0] || {};
+
+      // 3. Fetch Aadhaar Details & Photo
+      const [aadhaarRows]: any = await pool.execute(
+        `SELECT * FROM aadhaar_card_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const aadhaar = aadhaarRows[0] || {};
+
+      // 4. Fetch Customer Documents (Selfie / Aadhaar photo fallback)
+      const [docRows]: any = await pool.execute(
+        `SELECT * FROM customer_documents WHERE user_id = ? AND doc_type IN ('Selfie Photo', 'Aadhaar Photo', 'Photo') ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const custDoc = docRows[0] || {};
+
+      // Build User Avatar Image URL from cPanel customer_documents
+      let avatarUrl: string | null = null;
+      const rawImage = aadhaar.profile_image || custDoc.file_path || null;
+      if (rawImage) {
+        if (rawImage.startsWith('http')) {
+          avatarUrl = rawImage;
+        } else {
+          avatarUrl = `https://geetpay.in${rawImage.startsWith('/') ? '' : '/'}${rawImage}`;
+        }
+      }
+
+      // 5. Fetch Disbursed / Active Lead
+      const [leadRows]: any = await pool.execute(
+        `SELECT * FROM leads WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const lead = leadRows[0] || null;
+
+      // 6. Fetch CAM Details
+      let cam: any = null;
+      if (lead) {
+        const [camRows]: any = await pool.execute(
+          `SELECT * FROM cam_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+          [userId]
+        );
+        cam = camRows[0] || null;
+      }
+
+      // 7. Fetch Disbursement Records
+      const [disbRows]: any = await pool.execute(
+        `SELECT * FROM disbursements WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const disb = disbRows[0] || null;
+
+      // 8. Fetch Repayments Table
+      const [repayRows]: any = await pool.execute(
+        `SELECT * FROM loan_repayments WHERE user_id = ? ORDER BY id DESC`,
+        [userId]
+      );
+
+      // 9. Fetch Credit Report Details
+      const [creditReportRows]: any = await pool.execute(
+        `SELECT * FROM credit_report_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const creditReport = creditReportRows[0] || null;
+
+      // 10. Fetch Loan Account
+      const [loanAccRows]: any = await pool.execute(
+        `SELECT * FROM loan_accounts WHERE phone = ? OR borrower = ? LIMIT 1`,
+        [mobile, profile.full_name || '']
+      );
+      const loanAcc = loanAccRows[0] || null;
+
+      // User details
+      const userName = profile.full_name || bank.account_holder_name || aadhaar.full_name || 'GeetPay User';
+      const userEmail = profile.personal_email || `${mobile}@geetpay.com`;
+      const bankMaskedAcc = bank.account_number ? `•••• ${bank.account_number.slice(-4)}` : '';
+      const bankLabel = bank.bank_name ? `${bank.bank_name} ${bankMaskedAcc}` : 'No Bank Linked';
+
+      // Resolve Real CIBIL Score from MySQL
+      let cibil = 0;
+      if (creditReport?.ai_cibil_score && !isNaN(Number(creditReport.ai_cibil_score)) && Number(creditReport.ai_cibil_score) > 0) {
+        cibil = Number(creditReport.ai_cibil_score);
+      } else if (lead?.cibil_score && Number(lead.cibil_score) > 0) {
+        cibil = Number(lead.cibil_score);
+      } else if (creditReport?.crif_score && Number(creditReport.crif_score) > 0) {
+        cibil = Number(creditReport.crif_score);
+      } else if (creditReport?.experian_score && Number(creditReport.experian_score) > 0) {
+        cibil = Number(creditReport.experian_score);
+      } else if (cam?.cibil_score && Number(cam.cibil_score) > 0) {
+        cibil = Number(cam.cibil_score);
+      }
+
+      // Credit Rating Interpretation
+      let creditRating = 'Score Not Generated';
+      let creditDesc = 'Check credit score to unlock higher loan limits';
+      if (cibil >= 750) {
+        creditRating = 'Excellent Score 🌟';
+        creditDesc = 'Eligible for instant approval up to ₹1,00,000';
+      } else if (cibil >= 700) {
+        creditRating = 'Good Score 👍';
+        creditDesc = 'Eligible for pre-approved loan up to ₹75,000';
+      } else if (cibil >= 650) {
+        creditRating = 'Fair Score ⚡';
+        creditDesc = 'Eligible for payday loan up to ₹50,000';
+      } else if (cibil > 0) {
+        creditRating = 'Needs Improvement 📈';
+        creditDesc = 'Eligible for micro payday loan up to ₹25,000';
+      }
+
+      // Check if user has an active disbursed loan
+      const isDisbursed = lead && (lead.status === 'DISBURSED' || lead.loan_id || disb);
+
+      if (!isDisbursed) {
+        return {
+          user: {
+            id: userId,
+            name: userName,
+            phone: '+91 ' + mobile,
+            email: userEmail,
+            avatar: avatarUrl,
+            pan: profile.pan_number || 'Not Linked',
+            aadhaar: aadhaar.aadhaar_number || ('XXXX XXXX ' + mobile.slice(-4)),
+            creditScore: cibil,
+            creditRating: creditRating,
+            creditDesc: creditDesc,
+            bank: bankLabel,
+            upi: `${mobile}@upi`,
+          },
+          loan: {
+            id: '',
+            leadId: '',
+            status: 'NO_ACTIVE_LOAN',
+            amount: 0,
+            processingFee: 0,
+            gst: 0,
+            disbursed: 0,
+            dailyRate: 1,
+            startDate: '',
+            dueDate: '',
+            totalDays: 0,
+            elapsed: 0,
+            remaining: 0,
+            interest: 0,
+            outstanding: 0,
+            hasActiveLoan: false,
+          },
+          history: [],
+          transactions: [],
+        };
+      }
+
+      // Calculate Loan Metrics for Disbursed Lead
+      const principal = Number(cam?.loan_approved || cam?.loan_amount || lead?.loan_applied || loanAcc?.principal || 0);
+      const netDisbursed = Number(cam?.net_disbursed_amount || disb?.amount || loanAcc?.bank_disbursed_amount || principal);
+      const interest = Number(cam?.interest_amount || 0);
+      const processingFee = Number(cam?.processing_fee || 0);
+      const gst = Number(cam?.gst_on_processing_fee || 0);
+      const totalPayable = Number(cam?.total_amount_payable || loanAcc?.outstanding || (principal + interest));
+      const dailyRate = Number(cam?.roi_daily_percent || 1);
+      const totalDays = Number(cam?.tenure_days || loanAcc?.tenure || 7);
+
+      const startDateStr = cam?.disbursal_date || (disb?.disbursed_at ? new Date(disb.disbursed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '21 Aug 2026');
+      const dueDateStr = cam?.repay_date || loanAcc?.due_date || '27-08-2026';
+
+      let elapsed = 1;
+      let remaining = totalDays;
+      if (disb?.disbursed_at) {
+        const startMs = new Date(disb.disbursed_at).getTime();
+        const nowMs = Date.now();
+        elapsed = Math.max(1, Math.floor((nowMs - startMs) / (1000 * 60 * 60 * 24)));
+        remaining = Math.max(0, totalDays - elapsed);
+      }
+
+      // Build Real-Time Activity Log from DB
+      const transactions: any[] = [];
+
+      // 1. Any repayment transactions
+      if (Array.isArray(repayRows) && repayRows.length > 0) {
+        for (const rp of repayRows) {
+          transactions.push({
+            id: rp.id,
+            label: `Loan Repayment (${rp.payment_method || 'Online'})`,
+            sublabel: `Ref: ${rp.bank_reference || rp.cf_payment_id || rp.order_id || 'SUCCESS'}`,
+            amount: Number(rp.amount || 0),
+            date: rp.payment_time ? new Date(rp.payment_time).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : startDateStr,
+            credit: true,
+            category: 'repayment',
+          });
+        }
+      }
+
+      // 2. Disbursal Transaction
+      if (netDisbursed > 0) {
+        transactions.push({
+          id: 'disb-1',
+          label: `Loan Disbursed to ${bank.bank_name || 'Bank'}`,
+          sublabel: bank.utr_number ? `UTR: ${bank.utr_number}` : `Account: ${bankMaskedAcc}`,
+          amount: netDisbursed,
+          date: startDateStr,
+          credit: true,
+          category: 'disbursal',
+        });
+      }
+
+      // 3. Processing Fee Deduction
+      if (processingFee > 0) {
+        transactions.push({
+          id: 'fee-1',
+          label: `Processing Fee (${cam?.processing_fee_percent || '10'}%)`,
+          sublabel: 'Deducted upfront at disbursal',
+          amount: processingFee,
+          date: startDateStr,
+          credit: false,
+          category: 'fee',
+        });
+      }
+
+      // 4. GST on Processing Fee
+      if (gst > 0) {
+        transactions.push({
+          id: 'gst-1',
+          label: 'GST on Processing Fee (18%)',
+          sublabel: 'Govt Statutory Tax',
+          amount: gst,
+          date: startDateStr,
+          credit: false,
+          category: 'tax',
+        });
+      }
+
+      // 5. Interest Accrued
+      if (interest > 0) {
+        transactions.push({
+          id: 'int-1',
+          label: `Interest Accrual (${totalDays}d @ ${dailyRate}%/d)`,
+          sublabel: `Payable by ${dueDateStr}`,
+          amount: interest,
+          date: dueDateStr,
+          credit: false,
+          category: 'interest',
+        });
+      }
+
+      return {
+        user: {
+          id: userId,
+          name: userName,
+          phone: '+91 ' + mobile,
+          email: userEmail,
+          avatar: avatarUrl,
+          pan: profile.pan_number || 'ABCPS1234H',
+          aadhaar: aadhaar.aadhaar_number || ('XXXX XXXX ' + mobile.slice(-4)),
+          creditScore: cibil,
+          creditRating: creditRating,
+          creditDesc: creditDesc,
+          bank: bankLabel,
+          upi: `${mobile}@upi`,
+          salary: Number(cam?.salary_credit_amount_1 || 0),
+        },
+        loan: {
+          id: lead?.loan_id || loanAcc?.id || lead?.lead_id || 'LN-ACTIVE',
+          leadId: lead?.lead_id || 'GP-LEAD',
+          status: lead?.status || 'DISBURSED',
+          amount: principal,
+          processingFee: processingFee,
+          gst: gst,
+          disbursed: netDisbursed,
+          dailyRate: dailyRate,
+          startDate: startDateStr,
+          dueDate: dueDateStr,
+          totalDays: totalDays,
+          elapsed: elapsed,
+          remaining: remaining,
+          interest: interest,
+          outstanding: totalPayable,
+          hasActiveLoan: true,
+        },
+        history: [],
+        transactions: transactions,
+      };
+    } catch (error: any) {
+      console.error('❌ [LoanModel ERROR]:', error.message);
+      return {
+        user: {
+          id: userId,
+          name: 'GeetPay User',
+          phone: '+91 ' + mobile,
+          email: `${mobile}@geetpay.com`,
+          avatar: null,
+          creditScore: 0,
+          creditRating: 'Not Generated',
+          creditDesc: 'Apply for loan to generate credit score',
+          bank: 'No Bank Linked',
+        },
+        loan: {
+          id: '',
+          leadId: '',
+          status: 'NO_LOAN',
+          amount: 0,
+          processingFee: 0,
+          gst: 0,
+          disbursed: 0,
+          dailyRate: 1,
+          startDate: '',
+          dueDate: '',
+          totalDays: 0,
+          elapsed: 0,
+          remaining: 0,
+          interest: 0,
+          outstanding: 0,
+          hasActiveLoan: false,
+        },
+        history: [],
+        transactions: [],
+      };
+    }
+  }
+}
