@@ -1241,12 +1241,20 @@ function HistoryScreen({
 }
 
 // ─── 10. Notifications Screen ───────────────────────────────────────────────────
-function NotificationsScreen({ navigate }: { navigate: (s: Screen) => void }) {
+function NotificationsScreen({
+  navigate,
+  data,
+}: {
+  navigate: (s: Screen) => void;
+  data?: DashboardDataResponse | null;
+}) {
+  const notifs = data?.notifications && data.notifications.length > 0 ? data.notifications : NOTIFS_DATA;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
       <Header title="Notifications" onBack={() => navigate('home')} />
       <ScrollView contentContainerStyle={styles.detailContainer}>
-        {NOTIFS_DATA.map((item) => (
+        {notifs.map((item) => (
           <Card key={item.id} style={[styles.notifCard, item.unread ? styles.notifCardUnread : null]}>
             <View style={styles.notifHeaderRow}>
               <Text style={styles.notifTitle}>{item.title}</Text>
@@ -1545,7 +1553,7 @@ export default function App() {
         {screen === 'repay' && <RepayScreen navigate={navigate} data={dashboardData} />}
         {screen === 'pay-success' && <PaySuccessScreen navigate={navigate} data={dashboardData} />}
         {screen === 'history' && <HistoryScreen navigate={navigate} data={dashboardData} />}
-        {screen === 'notifications' && <NotificationsScreen navigate={navigate} />}
+        {screen === 'notifications' && <NotificationsScreen navigate={navigate} data={dashboardData} />}
         {screen === 'profile' && <ProfileScreen navigate={navigate} data={dashboardData} onLogout={handleLogout} />}
         {screen === 'support' && <SupportScreen navigate={navigate} />}
         {screen === 'kyc' && <KYCScreen navigate={navigate} data={dashboardData} />}

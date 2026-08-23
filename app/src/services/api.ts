@@ -107,6 +107,14 @@ export interface DashboardDataResponse {
       completed: boolean;
     }>;
   };
+  notifications?: Array<{
+    id: string | number;
+    title: string;
+    body: string;
+    time: string;
+    unread: boolean;
+    category?: string;
+  }>;
   history: Array<{
     id: string;
     amount: number;
