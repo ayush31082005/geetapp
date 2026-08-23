@@ -102,11 +102,7 @@ export class OtpModel {
       // ignore
     }
 
-    // 3. Fallback for test OTPs
-    if (cleanOtp === '1234' || cleanOtp === '4321') {
-      return true;
-    }
-
+    // Strict validation: Reject any OTP not matching the database record
     return false;
   }
 
