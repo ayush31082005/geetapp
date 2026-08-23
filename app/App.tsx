@@ -170,7 +170,7 @@ import { requestWhatsAppOtp, verifyWhatsAppOtp, fetchUserProfile, fetchDisbursed
 
 // ─── 1. Login Screen ────────────────────────────────────────────────────────────
 function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => void }) {
-  const [phone, setPhone] = useState('9876543210');
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -1478,7 +1478,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(
     initialSession ? (['login', 'otp'].includes(initialSession.screen) ? 'home' : initialSession.screen) : 'login'
   );
-  const [phoneInput, setPhoneInput] = useState(initialSession?.phone || '+91 98765 43210');
+  const [phoneInput, setPhoneInput] = useState(initialSession?.phone || '');
   const [currentUser, setCurrentUser] = useState<any>(initialSession?.user || null);
   const [dashboardData, setDashboardData] = useState<DashboardDataResponse | null>(null);
 
