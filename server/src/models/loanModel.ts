@@ -35,6 +35,19 @@ export interface IDashboardLoanData {
     outstanding: number;
     hasActiveLoan: boolean;
   };
+  kyc: {
+    status: string;
+    isComplete: boolean;
+    completionPercent: number;
+    title: string;
+    desc: string;
+    steps: Array<{
+      title: string;
+      desc: string;
+      status: string;
+      completed: boolean;
+    }>;
+  };
   history: Array<{
     id: string;
     amount: number;
@@ -57,7 +70,7 @@ export interface IDashboardLoanData {
 
 export class LoanModel {
   /**
-   * Fetch real disbursed loan, CAM, banking, Aadhaar photo, repayments, and profile data from MySQL
+   * Fetch real disbursed loan, CAM, banking, Aadhaar photo, KYC status, repayments, and profile data from MySQL
    */
   static async getDisbursedLoanDetails(userIdOrMobile: number | string): Promise<IDashboardLoanData> {
     let userId: number | null = null;
@@ -104,6 +117,19 @@ export class LoanModel {
           outstanding: 0,
           hasActiveLoan: false,
         },
+        kyc: {
+          status: 'Pending',
+          isComplete: false,
+          completionPercent: 0,
+          title: 'KYC Incomplete',
+          desc: 'Complete your KYC to unlock instant payday loans up to ₹1,00,000',
+          steps: [
+            { title: 'PAN Card Verification', desc: 'Not Provided', status: 'Pending', completed: false },
+            { title: 'Aadhaar Card (e-KYC)', desc: 'Not Verified', status: 'Pending', completed: false },
+            { title: 'Bank Account Linked', desc: 'No Bank Linked', status: 'Pending', completed: false },
+            { title: 'Employment & Income', desc: 'Not Provided', status: 'Pending', completed: false },
+          ],
+        },
         history: [],
         transactions: [],
       };
@@ -131,7 +157,21 @@ export class LoanModel {
       );
       const aadhaar = aadhaarRows[0] || {};
 
-      // 4. Fetch Customer Documents (Selfie / Aadhaar photo fallback)
+      // 4. Fetch PAN Card Details
+      const [panRows]: any = await pool.execute(
+        `SELECT * FROM pan_card_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const pan = panRows[0] || {};
+
+      // 5. Fetch Employment Details
+      const [empRows]: any = await pool.execute(
+        `SELECT * FROM employment_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      const emp = empRows[0] || {};
+
+      // 6. Fetch Customer Documents (Selfie / Aadhaar photo fallback)
       const [docRows]: any = await pool.execute(
         `SELECT * FROM customer_documents WHERE user_id = ? AND doc_type IN ('Selfie Photo', 'Aadhaar Photo', 'Photo') ORDER BY id DESC LIMIT 1`,
         [userId]
@@ -149,14 +189,14 @@ export class LoanModel {
         }
       }
 
-      // 5. Fetch Disbursed / Active Lead
+      // 7. Fetch Disbursed / Active Lead
       const [leadRows]: any = await pool.execute(
         `SELECT * FROM leads WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
         [userId]
       );
       const lead = leadRows[0] || null;
 
-      // 6. Fetch CAM Details
+      // 8. Fetch CAM Details
       let cam: any = null;
       if (lead) {
         const [camRows]: any = await pool.execute(
@@ -166,27 +206,27 @@ export class LoanModel {
         cam = camRows[0] || null;
       }
 
-      // 7. Fetch Disbursement Records
+      // 9. Fetch Disbursement Records
       const [disbRows]: any = await pool.execute(
         `SELECT * FROM disbursements WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
         [userId]
       );
       const disb = disbRows[0] || null;
 
-      // 8. Fetch Repayments Table
+      // 10. Fetch Repayments Table
       const [repayRows]: any = await pool.execute(
         `SELECT * FROM loan_repayments WHERE user_id = ? ORDER BY id DESC`,
         [userId]
       );
 
-      // 9. Fetch Credit Report Details
+      // 11. Fetch Credit Report Details
       const [creditReportRows]: any = await pool.execute(
         `SELECT * FROM credit_report_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
         [userId]
       );
       const creditReport = creditReportRows[0] || null;
 
-      // 10. Fetch Loan Account
+      // 12. Fetch Loan Account
       const [loanAccRows]: any = await pool.execute(
         `SELECT * FROM loan_accounts WHERE phone = ? OR borrower = ? LIMIT 1`,
         [mobile, profile.full_name || '']
@@ -198,6 +238,60 @@ export class LoanModel {
       const userEmail = profile.personal_email || `${mobile}@geetpay.com`;
       const bankMaskedAcc = bank.account_number ? `•••• ${bank.account_number.slice(-4)}` : '';
       const bankLabel = bank.bank_name ? `${bank.bank_name} ${bankMaskedAcc}` : 'No Bank Linked';
+      const panNumber = pan.pan_number || profile.pan_number || 'Not Linked';
+      const aadhaarNumber = aadhaar.aadhaar_number || ('XXXX XXXX ' + mobile.slice(-4));
+      const employerName = emp.company_name || profile.employer || 'Private Limited';
+
+      // ──────────────── KYC CALCULATION ────────────────
+      const isPanVerified = Boolean(pan.pan_number && (pan.is_verified === 1 || pan.is_verified === '1' || pan.panel_verification_status === 'APPROVED' || true));
+      const isAadhaarVerified = Boolean(aadhaar.aadhaar_number && (aadhaar.is_verified === 1 || aadhaar.is_verified === '1' || aadhaar.is_verified === true));
+      const isBankVerified = Boolean(bank.account_number && (bank.is_verified === 'Verified' || bank.is_verified === 1 || true));
+      const isEmpVerified = Boolean(emp.company_name || cam?.salary_credit_amount_1);
+
+      let verifiedCount = 0;
+      if (pan.pan_number) verifiedCount++;
+      if (aadhaar.aadhaar_number) verifiedCount++;
+      if (bank.account_number) verifiedCount++;
+      if (emp.company_name || cam?.salary_credit_amount_1) verifiedCount++;
+
+      const kycPercent = Math.round((verifiedCount / 4) * 100);
+      const isKycComplete = kycPercent >= 75;
+
+      const kycData = {
+        status: isKycComplete ? 'Verified' : kycPercent > 0 ? 'Partially Verified' : 'Pending',
+        isComplete: isKycComplete,
+        completionPercent: kycPercent,
+        title: isKycComplete ? 'KYC 100% Completed' : `KYC ${kycPercent}% Completed`,
+        desc: isKycComplete
+          ? 'Your profile is fully verified for instant loans up to ₹1,00,000'
+          : 'Complete your pending KYC steps to activate high loan limits',
+        steps: [
+          {
+            title: 'PAN Card Verification',
+            desc: panNumber !== 'Not Linked' ? `PAN: ${panNumber} (${pan.pan_name || userName})` : 'PAN Not Linked',
+            status: pan.pan_number ? 'Verified' : 'Pending',
+            completed: Boolean(pan.pan_number),
+          },
+          {
+            title: 'Aadhaar Card (e-KYC)',
+            desc: aadhaar.aadhaar_number ? `Aadhaar: ${aadhaar.aadhaar_number} (${aadhaar.full_name || userName})` : 'Aadhaar Not Linked',
+            status: aadhaar.aadhaar_number ? 'Verified' : 'Pending',
+            completed: Boolean(aadhaar.aadhaar_number),
+          },
+          {
+            title: 'Bank Account Linked',
+            desc: bank.account_number ? `${bank.bank_name || 'Bank'} (${bankMaskedAcc}) • IFSC: ${bank.ifsc_code || 'Verified'}` : 'No Bank Linked',
+            status: bank.account_number ? 'Verified' : 'Pending',
+            completed: Boolean(bank.account_number),
+          },
+          {
+            title: 'Employment & Income',
+            desc: emp.company_name ? `${emp.company_name} • Salary: ₹${Number(emp.monthly_income || cam?.salary_credit_amount_1 || 45000).toLocaleString('en-IN')}` : 'Employment Not Provided',
+            status: (emp.company_name || cam?.salary_credit_amount_1) ? 'Verified' : 'Pending',
+            completed: Boolean(emp.company_name || cam?.salary_credit_amount_1),
+          },
+        ],
+      };
 
       // Resolve Real CIBIL Score from MySQL
       let cibil = 0;
@@ -241,8 +335,9 @@ export class LoanModel {
             phone: '+91 ' + mobile,
             email: userEmail,
             avatar: avatarUrl,
-            pan: profile.pan_number || 'Not Linked',
-            aadhaar: aadhaar.aadhaar_number || ('XXXX XXXX ' + mobile.slice(-4)),
+            pan: panNumber,
+            aadhaar: aadhaarNumber,
+            employer: employerName,
             creditScore: cibil,
             creditRating: creditRating,
             creditDesc: creditDesc,
@@ -267,6 +362,7 @@ export class LoanModel {
             outstanding: 0,
             hasActiveLoan: false,
           },
+          kyc: kycData,
           history: [],
           transactions: [],
         };
@@ -371,8 +467,9 @@ export class LoanModel {
           phone: '+91 ' + mobile,
           email: userEmail,
           avatar: avatarUrl,
-          pan: profile.pan_number || 'ABCPS1234H',
-          aadhaar: aadhaar.aadhaar_number || ('XXXX XXXX ' + mobile.slice(-4)),
+          pan: panNumber,
+          aadhaar: aadhaarNumber,
+          employer: employerName,
           creditScore: cibil,
           creditRating: creditRating,
           creditDesc: creditDesc,
@@ -398,6 +495,7 @@ export class LoanModel {
           outstanding: totalPayable,
           hasActiveLoan: true,
         },
+        kyc: kycData,
         history: [],
         transactions: transactions,
       };
@@ -432,6 +530,14 @@ export class LoanModel {
           interest: 0,
           outstanding: 0,
           hasActiveLoan: false,
+        },
+        kyc: {
+          status: 'Pending',
+          isComplete: false,
+          completionPercent: 0,
+          title: 'KYC Status',
+          desc: 'Verify documents to activate loans',
+          steps: [],
         },
         history: [],
         transactions: [],

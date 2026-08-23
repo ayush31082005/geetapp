@@ -94,6 +94,19 @@ export interface DashboardDataResponse {
     outstanding: number;
     hasActiveLoan: boolean;
   };
+  kyc?: {
+    status: string;
+    isComplete: boolean;
+    completionPercent: number;
+    title: string;
+    desc: string;
+    steps: Array<{
+      title: string;
+      desc: string;
+      status: string;
+      completed: boolean;
+    }>;
+  };
   history: Array<{
     id: string;
     amount: number;
@@ -105,9 +118,11 @@ export interface DashboardDataResponse {
   }>;
   transactions: Array<{
     label: string;
+    sublabel?: string;
     amount: number;
     date: string;
     credit: boolean;
+    category?: string;
   }>;
 }
 

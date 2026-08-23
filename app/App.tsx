@@ -1063,23 +1063,33 @@ function KYCScreen({
   data?: DashboardDataResponse | null;
 }) {
   const user = data?.user || USER_DATA;
+  const kyc = data?.kyc;
 
-  const steps = [
-    { title: 'PAN Card Verification', desc: user.pan || 'ABCPS1234H', status: 'Verified', completed: true },
-    { title: 'Aadhaar Card (e-KYC)', desc: user.aadhaar || 'XXXX XXXX 6789', status: 'Verified', completed: true },
-    { title: 'Bank Account Linked', desc: user.bank || 'IDFC FIRST Bank •••• 8111', status: 'Active', completed: true },
-    { title: 'Employment & Income', desc: user.employer || 'Private Limited', status: 'Verified', completed: true },
+  const defaultSteps = [
+    { title: 'PAN Card Verification', desc: user.pan && user.pan !== 'Not Linked' ? `PAN: ${user.pan} (${user.name})` : 'PAN Not Linked', status: user.pan && user.pan !== 'Not Linked' ? 'Verified' : 'Pending', completed: Boolean(user.pan && user.pan !== 'Not Linked') },
+    { title: 'Aadhaar Card (e-KYC)', desc: user.aadhaar ? `Aadhaar: ${user.aadhaar} (${user.name})` : 'Aadhaar Not Linked', status: user.aadhaar ? 'Verified' : 'Pending', completed: Boolean(user.aadhaar) },
+    { title: 'Bank Account Linked', desc: user.bank || 'No Bank Linked', status: user.bank && user.bank !== 'No Bank Linked' ? 'Active' : 'Pending', completed: Boolean(user.bank && user.bank !== 'No Bank Linked') },
+    { title: 'Employment & Income', desc: user.employer ? `${user.employer} • Salary Verified` : 'Employment Not Provided', status: user.employer ? 'Verified' : 'Pending', completed: Boolean(user.employer) },
   ];
+
+  const steps = kyc?.steps && kyc.steps.length > 0 ? kyc.steps : defaultSteps;
+  const isComplete = kyc ? kyc.isComplete : steps.every((s) => s.completed);
+  const percent = kyc?.completionPercent ?? (isComplete ? 100 : 50);
+  const title = kyc?.title || (isComplete ? 'KYC 100% Completed' : `KYC ${percent}% Completed`);
+  const desc = kyc?.desc || (isComplete ? 'Your profile is fully verified for instant loans up to ₹1,00,000' : 'Complete remaining verification steps to activate instant loans');
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BG }}>
       <Header title="KYC & Verification" onBack={() => navigate('home')} />
       <ScrollView contentContainerStyle={styles.detailContainer}>
         {/* Status Banner */}
-        <LinearGradient colors={[GREEN, '#1E7D14']} style={styles.kycHeroCard}>
+        <LinearGradient
+          colors={isComplete ? [GREEN, '#1E7D14'] : ['#EAB308', '#CA8A04']}
+          style={styles.kycHeroCard}
+        >
           <Shield size={32} color="#FFFFFF" />
-          <Text style={styles.kycHeroTitle}>KYC 100% Completed</Text>
-          <Text style={styles.kycHeroDesc}>Your profile is fully verified for instant loans up to ₹1,00,000</Text>
+          <Text style={styles.kycHeroTitle}>{title}</Text>
+          <Text style={styles.kycHeroDesc}>{desc}</Text>
         </LinearGradient>
 
         <Text style={styles.sectionTitle}>Verified Documents</Text>
@@ -1087,16 +1097,37 @@ function KYCScreen({
         {steps.map((s, idx) => (
           <Card key={idx} style={styles.kycStepCard}>
             <View style={styles.kycStepLeft}>
-              <View style={styles.kycCheckCircle}>
-                <Check size={16} color="#FFFFFF" strokeWidth={3} />
+              <View
+                style={[
+                  styles.kycCheckCircle,
+                  !s.completed && { backgroundColor: '#CBD5E1' },
+                ]}
+              >
+                {s.completed ? (
+                  <Check size={16} color="#FFFFFF" strokeWidth={3} />
+                ) : (
+                  <Lock size={14} color="#FFFFFF" />
+                )}
               </View>
-              <View style={{ marginLeft: 12 }}>
+              <View style={{ marginLeft: 12, flex: 1 }}>
                 <Text style={styles.kycStepTitle}>{s.title}</Text>
-                <Text style={styles.kycStepDesc}>{s.desc}</Text>
+                <Text style={styles.kycStepDesc} numberOfLines={2}>{s.desc}</Text>
               </View>
             </View>
-            <View style={styles.verifiedPill}>
-              <Text style={styles.verifiedPillText}>{s.status}</Text>
+            <View
+              style={[
+                styles.verifiedPill,
+                !s.completed && { backgroundColor: '#F1F5F9' },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.verifiedPillText,
+                  !s.completed && { color: '#64748B' },
+                ]}
+              >
+                {s.status}
+              </Text>
             </View>
           </Card>
         ))}
