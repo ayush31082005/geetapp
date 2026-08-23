@@ -22,12 +22,16 @@ const getDetectedHost = (): string => {
   return '10.208.157.130';
 };
 
+export const PRODUCTION_API_URL = 'https://geetapp-7u5h.onrender.com/api';
+export const PRODUCTION_ROOT_URL = 'https://geetapp-7u5h.onrender.com';
+
 /**
- * Returns prioritized list of candidate root URLs (port 1000)
+ * Returns prioritized list of candidate root URLs (Live Render First, then Local Fallback)
  */
 export const getCandidateRootUrls = (): string[] => {
   const detectedHost = getDetectedHost();
   const list = [
+    'https://geetapp-7u5h.onrender.com',
     `http://${detectedHost}:1000`,
     'http://10.208.157.130:1000',
     'http://localhost:1000',
@@ -37,8 +41,7 @@ export const getCandidateRootUrls = (): string[] => {
 };
 
 export const getResolvedBaseUrl = (): string => {
-  const detectedHost = getDetectedHost();
-  return `http://${detectedHost}:1000/api`;
+  return 'https://geetapp-7u5h.onrender.com/api';
 };
 
 export interface SendOtpResponse {
