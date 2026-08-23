@@ -517,7 +517,14 @@ function HomeScreen({
             {/* Progress bar */}
             <View style={styles.progressContainer}>
               <View style={styles.progressBarBg}>
-                <View style={[styles.progressBarFill, { width: `${Math.min(100, (loan.elapsed / Math.max(1, loan.totalDays)) * 100)}%` }]} />
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${Math.min(100, Math.max(5, Math.round((loan.elapsed / Math.max(1, loan.totalDays)) * 100)))}%`,
+                    },
+                  ]}
+                />
               </View>
               <View style={styles.progressLabelRow}>
                 <Text style={styles.progressText}>Disbursed: {loan.startDate}</Text>
