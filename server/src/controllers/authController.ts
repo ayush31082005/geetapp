@@ -48,7 +48,6 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       message: 'OTP has been sent to your WhatsApp number!',
       mobile: cleanMobile,
       otpLength: 4,
-      devOtp: otp, // For rapid testing & console verification
       whatsappDispatched: waResult.success,
     });
   } catch (error: any) {

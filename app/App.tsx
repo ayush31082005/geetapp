@@ -476,29 +476,6 @@ function OTPScreen({
           ))}
         </View>
 
-        {devOtp ? (
-          <TouchableOpacity
-            style={{
-              backgroundColor: '#EEF2FF',
-              paddingVertical: 6,
-              paddingHorizontal: 12,
-              borderRadius: 8,
-              alignSelf: 'center',
-              marginBottom: 16,
-              borderWidth: 1,
-              borderColor: '#C7D2FE',
-            }}
-            onPress={() => {
-              const digits = devOtp.split('').slice(0, 4);
-              setOtp(digits);
-            }}
-          >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: NAVY }}>
-              ⚡ Auto-Fill Code ({devOtp})
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-
         {statusMsg ? (
           <Text
             style={{
