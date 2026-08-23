@@ -36,6 +36,11 @@ export const getCandidateRootUrls = (): string[] => {
   return Array.from(new Set(list));
 };
 
+export const getResolvedBaseUrl = (): string => {
+  const detectedHost = getDetectedHost();
+  return `http://${detectedHost}:1000/api`;
+};
+
 export interface SendOtpResponse {
   success: boolean;
   message: string;

