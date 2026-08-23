@@ -12,6 +12,10 @@ function generate4DigitOtp(): string {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
+// In-memory rate limiting map (30s cooldown per mobile number)
+const lastOtpRequestTime = new Map<string, number>();
+const OTP_COOLDOWN_MS = 30 * 1000;
+
 /**
  * POST /api/auth/send-otp
  * Body: { mobile: "9876543210" }
@@ -31,6 +35,20 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       res.status(400).json({ success: false, message: 'Invalid 10-digit mobile number' });
       return;
     }
+
+    // Rate limiting check
+    const now = Date.now();
+    const lastRequest = lastOtpRequestTime.get(cleanMobile);
+    if (lastRequest && now - lastRequest < OTP_COOLDOWN_MS) {
+      const remainingSec = Math.ceil((OTP_COOLDOWN_MS - (now - lastRequest)) / 1000);
+      console.log(`⏱️ [RATE LIMIT] User +91 ${cleanMobile} is on cooldown. ${remainingSec}s remaining.`);
+      res.status(429).json({
+        success: false,
+        message: `Please wait ${remainingSec} seconds before requesting a new OTP.`,
+      });
+      return;
+    }
+    lastOtpRequestTime.set(cleanMobile, now);
 
     // Generate 4-digit OTP
     const otp = generate4DigitOtp();
