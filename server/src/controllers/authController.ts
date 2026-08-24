@@ -36,6 +36,20 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // 0. Verify Sanction Letter / Loan Approval Status in MySQL
+    const approval = await UserModel.checkSanctionApproval(cleanMobile);
+    if (!approval.approved) {
+      console.log(`🚫 [LOGIN BLOCKED] User +91 ${cleanMobile} does NOT have an approved sanction letter. Reason: ${approval.reason}`);
+      res.status(403).json({
+        success: false,
+        sanctionApproved: false,
+        message: approval.reason || 'Your Sanction Letter is not approved yet.',
+      });
+      return;
+    }
+
+    console.log(`✅ [SANCTION APPROVED] User +91 ${cleanMobile} verified (${approval.reason}). Proceeding to send OTP.`);
+
     // Rate limiting check
     const now = Date.now();
     const lastRequest = lastOtpRequestTime.get(cleanMobile);
@@ -63,6 +77,7 @@ export async function sendOtp(req: Request, res: Response): Promise<void> {
 
     res.status(200).json({
       success: true,
+      sanctionApproved: true,
       message: 'OTP has been sent to your WhatsApp number!',
       mobile: cleanMobile,
       otpLength: 4,
@@ -89,6 +104,16 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
 
     const cleanMobile = mobile.toString().replace(/\D/g, '').slice(-10);
     const cleanOtp = otp.toString().trim();
+
+    // 0. Verify Sanction Letter Approval
+    const approval = await UserModel.checkSanctionApproval(cleanMobile);
+    if (!approval.approved) {
+      res.status(403).json({
+        success: false,
+        message: approval.reason || 'Your Sanction Letter is not approved yet.',
+      });
+      return;
+    }
 
     // 1. Verify OTP using OtpModel
     const isValid = await OtpModel.verify(cleanMobile, cleanOtp);

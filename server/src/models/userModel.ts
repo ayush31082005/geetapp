@@ -138,4 +138,115 @@ export class UserModel {
     const [rows] = await pool.execute<RowDataPacket[]>(query, params);
     return (rows[0] as UserWithProfile) || null;
   }
+
+  /**
+   * Check if user exists and has an approved sanction letter / loan in MySQL
+   */
+  static async checkSanctionApproval(mobileNumber: string): Promise<{
+    approved: boolean;
+    reason: string;
+    user?: IUser | null;
+    approvedAmount?: number;
+  }> {
+    const cleanMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+
+    // 1. Check if user exists in `users` table
+    const user = await this.findByMobile(cleanMobile);
+    if (!user) {
+      return {
+        approved: false,
+        reason: 'This mobile number is not registered or does not have an active loan application.',
+        user: null,
+      };
+    }
+
+    const userId = user.id;
+
+    // 2. Check `cam_details` (Approved CAM / Sanction Amount)
+    try {
+      const [camRows]: any = await pool.execute(
+        `SELECT id, loan_approved, loan_amount, created_at FROM cam_details WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      if (camRows && camRows.length > 0) {
+        const approvedAmt = Number(camRows[0].loan_approved || camRows[0].loan_amount || 0);
+        if (approvedAmt > 0) {
+          return {
+            approved: true,
+            reason: 'Sanction Letter Approved via CAM',
+            user,
+            approvedAmount: approvedAmt,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [UserModel] CAM check warning:', err.message);
+    }
+
+    // 3. Check `leads` table status
+    try {
+      const [leadRows]: any = await pool.execute(
+        `SELECT id, status, loan_id FROM leads WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      if (leadRows && leadRows.length > 0) {
+        const lead = leadRows[0];
+        const statusUpper = (lead.status || '').toUpperCase();
+        const approvedStatuses = ['COMPLETED', 'DISBURSED', 'SANCTIONED', 'APPROVED', 'SENT_TO_ACCOUNTS'];
+        if (approvedStatuses.includes(statusUpper) || lead.loan_id) {
+          return {
+            approved: true,
+            reason: `Lead Status: ${lead.status}`,
+            user,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [UserModel] Lead check warning:', err.message);
+    }
+
+    // 4. Check `disbursements` table
+    try {
+      const [disbRows]: any = await pool.execute(
+        `SELECT id, amount FROM disbursements WHERE user_id = ? LIMIT 1`,
+        [userId]
+      );
+      if (disbRows && disbRows.length > 0) {
+        return {
+          approved: true,
+          reason: 'Loan Disbursed',
+          user,
+          approvedAmount: Number(disbRows[0].amount || 0),
+        };
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [UserModel] Disbursement check warning:', err.message);
+    }
+
+    // 5. Check `applications` table
+    try {
+      const [appRows]: any = await pool.execute(
+        `SELECT id, status FROM applications WHERE user_id = ? ORDER BY id DESC LIMIT 1`,
+        [userId]
+      );
+      if (appRows && appRows.length > 0) {
+        const appStatus = (appRows[0].status || '').toUpperCase();
+        if (['APPROVED', 'SANCTIONED', 'DISBURSED'].includes(appStatus)) {
+          return {
+            approved: true,
+            reason: `Application Status: ${appRows[0].status}`,
+            user,
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [UserModel] Application check warning:', err.message);
+    }
+
+    return {
+      approved: false,
+      reason: 'Your Sanction Letter is not approved yet.',
+      user,
+    };
+  }
 }

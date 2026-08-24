@@ -142,7 +142,7 @@ export class LoanModel {
           {
             id: 'notif-welcome',
             title: 'Welcome to GeetPay! 🎉',
-            body: 'Get instant payday loans up to ₹1,00,000 deposited straight into your bank account.',
+            body: 'Get instant payday loans deposited straight into your bank account.',
             time: 'Just now',
             unread: true,
             category: 'welcome',
@@ -328,21 +328,25 @@ export class LoanModel {
         cibil = Number(cam.cibil_score);
       }
 
-      // Credit Rating Interpretation
+      // Real Credit Rating Interpretation from MySQL credit_report_details
       let creditRating = 'Score Not Generated';
-      let creditDesc = 'Check credit score to unlock higher loan limits';
-      if (cibil >= 750) {
+      let creditDesc = 'Check credit score to unlock loan benefits';
+
+      if (creditReport?.ai_score_interpretation) {
+        const raw = creditReport.ai_score_interpretation.trim();
+        if (raw.toLowerCase() === 'excellent') creditRating = 'Excellent Score 🌟';
+        else if (raw.toLowerCase() === 'good') creditRating = 'Good Score 👍';
+        else if (raw.toLowerCase() === 'fair') creditRating = 'Fair Score ⚡';
+        else if (raw.toLowerCase() === 'poor' || raw.toLowerCase() === 'bad') creditRating = 'Needs Improvement 📈';
+        else creditRating = `${raw} Score`;
+      } else if (cibil >= 750) {
         creditRating = 'Excellent Score 🌟';
-        creditDesc = 'Eligible for instant approval up to ₹1,00,000';
       } else if (cibil >= 700) {
         creditRating = 'Good Score 👍';
-        creditDesc = 'Eligible for pre-approved loan up to ₹75,000';
       } else if (cibil >= 650) {
         creditRating = 'Fair Score ⚡';
-        creditDesc = 'Eligible for payday loan up to ₹50,000';
       } else if (cibil > 0) {
         creditRating = 'Needs Improvement 📈';
-        creditDesc = 'Eligible for micro payday loan up to ₹25,000';
       }
 
       // Check if user has an active disbursed loan
@@ -353,7 +357,7 @@ export class LoanModel {
           {
             id: 'notif-welcome',
             title: 'Welcome to GeetPay! 🎉',
-            body: `Hello ${userName}, get instant payday loans up to ₹1,00,000 deposited straight into your bank account.`,
+            body: `Hello ${userName}, get instant payday loans deposited straight into your bank account.`,
             time: 'Just now',
             unread: true,
             category: 'welcome',
@@ -530,7 +534,7 @@ export class LoanModel {
         {
           id: 'notif-4',
           title: 'Credit Score Live 📊',
-          body: `Your CIBIL Score is ${cibil} (${creditRating}). ${creditDesc}`,
+          body: `Your CIBIL Score is ${cibil} (${creditRating}). Keep repaying on time to maintain a strong score!`,
           time: 'Active',
           unread: false,
           category: 'credit',
