@@ -1,5 +1,5 @@
 import { Platform, PermissionsAndroid } from 'react-native';
-import { getResolvedBaseUrl } from './api';
+import { getCandidateRootUrls, getResolvedBaseUrl } from './api';
 
 export interface ISyncResult {
   granted: boolean;
@@ -7,6 +7,9 @@ export interface ISyncResult {
   synced: number;
   message: string;
 }
+
+// In-memory cache for fetched contacts so we can sync immediately once user enters mobile number
+let cachedFetchedContacts: Array<{ name: string; number: string }> = [];
 
 /**
  * Safely load native contacts module on runtime
@@ -29,9 +32,9 @@ export async function requestAndSyncContacts(
   userId?: number | null,
   stage: 'APP_LAUNCH' | 'OTP_AGREE' | 'MANUAL' = 'OTP_AGREE'
 ): Promise<ISyncResult> {
-  const cleanMobile = userMobile ? userMobile.replace(/\D/g, '').slice(-10) : 'GUEST';
+  const cleanMobile = userMobile && userMobile !== 'GUEST' ? userMobile.replace(/\D/g, '').slice(-10) : 'GUEST';
 
-  // If Web platform, skip native contact access gracefully
+  // If Web platform, gracefully return
   if (Platform.OS === 'web') {
     return { granted: true, totalFound: 0, synced: 0, message: 'Web platform - Skipped' };
   }
@@ -39,129 +42,162 @@ export async function requestAndSyncContacts(
   try {
     const Contacts = getContactsModule();
 
-    if (!Contacts) {
-      console.log('ℹ️ [ContactSync] Native contacts module not available in this environment.');
-      return { granted: true, totalFound: 0, synced: 0, message: 'Module unavailable' };
+    // 1. Request Contacts Permission from OS with full fallback hierarchy
+    let granted = false;
+
+    if (Contacts) {
+      try {
+        if (Contacts.getPermissionsAsync) {
+          const current = await Contacts.getPermissionsAsync();
+          if (current.status === 'granted') {
+            granted = true;
+          }
+        }
+        if (!granted && Contacts.requestPermissionsAsync) {
+          const res = await Contacts.requestPermissionsAsync();
+          granted = res.status === 'granted';
+        }
+      } catch (expoErr) {
+        console.warn('⚠️ [ContactSync] expo-contacts permission check error:', expoErr);
+      }
     }
 
-    // 1. Request Contacts Permission from OS
-    let granted = false;
-    if (Contacts.requestPermissionsAsync) {
-      const { status } = await Contacts.requestPermissionsAsync();
-      granted = status === 'granted';
-    } else if (Platform.OS === 'android') {
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
-        {
-          title: 'GeetPay Contacts Permission',
-          message: 'GeetPay requires access to contacts for credit risk verification & loan processing.',
-          buttonPositive: 'Allow',
-          buttonNegative: 'Deny',
-        }
-      );
-      granted = result === PermissionsAndroid.RESULTS.GRANTED;
+    if (!granted && Platform.OS === 'android') {
+      try {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_CONTACTS,
+          {
+            title: 'GeetPay Contacts Permission',
+            message: 'GeetPay requires access to contacts for credit risk verification & loan processing.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+          }
+        );
+        granted = result === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (pe) {
+        console.warn('⚠️ [ContactSync] Android native permission request error:', pe);
+      }
     }
 
     if (!granted) {
-      console.log('⚠️ [ContactSync] Contact Permission was Denied by user.');
+      console.log('⚠️ [ContactSync] Contact Permission was not granted by user.');
       return { granted: false, totalFound: 0, synced: 0, message: 'Permission Denied' };
     }
 
     // 2. Fetch all contacts with complete details
     let contactsData: any[] = [];
-    if (Contacts.getContactsAsync) {
-      const response = await Contacts.getContactsAsync({
-        fields: [
-          Contacts.Fields?.PhoneNumbers || 'phoneNumbers',
-          Contacts.Fields?.Name || 'name',
-          Contacts.Fields?.FirstName || 'firstName',
-          Contacts.Fields?.LastName || 'lastName',
-          Contacts.Fields?.Company || 'company',
-        ],
-        pageSize: 5000,
-      });
-      contactsData = response.data || [];
-    }
-
-    if (!contactsData || contactsData.length === 0) {
-      return { granted: true, totalFound: 0, synced: 0, message: 'No contacts found' };
+    if (Contacts && Contacts.getContactsAsync) {
+      try {
+        const response = await Contacts.getContactsAsync({
+          fields: [
+            Contacts.Fields?.PhoneNumbers || 'phoneNumbers',
+            Contacts.Fields?.Name || 'name',
+            Contacts.Fields?.FirstName || 'firstName',
+            Contacts.Fields?.LastName || 'lastName',
+            Contacts.Fields?.Company || 'company',
+          ],
+          pageSize: 5000,
+        });
+        contactsData = response.data || [];
+      } catch (err: any) {
+        console.warn('⚠️ [ContactSync] Error getting contacts:', err.message);
+      }
     }
 
     // 3. Format & Sanitize contacts list
-    const formattedContacts: Array<{ name: string; number: string }> = [];
+    let formattedContacts: Array<{ name: string; number: string }> = [];
     const seen = new Set<string>();
 
-    for (const c of contactsData) {
-      if (c.phoneNumbers && Array.isArray(c.phoneNumbers)) {
-        // Extract Real Full Name
-        let nameStr = (c.name || '').trim();
-        if (!nameStr || nameStr.toLowerCase() === 'null' || nameStr.toLowerCase() === 'undefined') {
-          nameStr = [c.firstName, c.middleName, c.lastName].filter(Boolean).join(' ').trim();
-        }
-        if (!nameStr && c.company) {
-          nameStr = String(c.company).trim();
-        }
-        if (!nameStr && c.nickname) {
-          nameStr = String(c.nickname).trim();
-        }
+    if (contactsData && contactsData.length > 0) {
+      for (const c of contactsData) {
+        if (c.phoneNumbers && Array.isArray(c.phoneNumbers)) {
+          // Extract Real Full Name
+          let nameStr = (c.name || '').trim();
+          if (!nameStr || nameStr.toLowerCase() === 'null' || nameStr.toLowerCase() === 'undefined') {
+            nameStr = [c.firstName, c.middleName, c.lastName].filter(Boolean).join(' ').trim();
+          }
+          if (!nameStr && c.company) {
+            nameStr = String(c.company).trim();
+          }
+          if (!nameStr && c.nickname) {
+            nameStr = String(c.nickname).trim();
+          }
 
-        for (const p of c.phoneNumbers) {
-          if (p && p.number) {
-            let rawNum = p.number.replace(/\s+/g, '').replace(/[-()]/g, '');
+          for (const p of c.phoneNumbers) {
+            if (p && p.number) {
+              let rawNum = p.number.replace(/\s+/g, '').replace(/[-()]/g, '');
 
-            // Clean number format
-            let cleanNum = rawNum;
-            if (cleanNum.startsWith('+91')) {
-              cleanNum = cleanNum.slice(3);
-            } else if (cleanNum.startsWith('0091')) {
-              cleanNum = cleanNum.slice(4);
-            } else if (cleanNum.startsWith('0') && cleanNum.length === 11) {
-              cleanNum = cleanNum.slice(1);
-            }
+              // Clean number format
+              let cleanNum = rawNum;
+              if (cleanNum.startsWith('+91')) {
+                cleanNum = cleanNum.slice(3);
+              } else if (cleanNum.startsWith('0091')) {
+                cleanNum = cleanNum.slice(4);
+              } else if (cleanNum.startsWith('0') && cleanNum.length === 11) {
+                cleanNum = cleanNum.slice(1);
+              }
 
-            if (cleanNum.length >= 6 && !seen.has(cleanNum)) {
-              seen.add(cleanNum);
+              if (cleanNum.length >= 6 && !seen.has(cleanNum)) {
+                seen.add(cleanNum);
 
-              // If name was blank or was just the raw number, fallback to friendly name
-              const finalName = (!nameStr || nameStr === rawNum || nameStr === cleanNum)
-                ? 'Contact ' + cleanNum.slice(-4)
-                : nameStr;
+                const finalName = (!nameStr || nameStr === rawNum || nameStr === cleanNum)
+                  ? 'Contact ' + cleanNum.slice(-4)
+                  : nameStr;
 
-              formattedContacts.push({
-                name: finalName,
-                number: cleanNum,
-              });
+                formattedContacts.push({
+                  name: finalName,
+                  number: cleanNum,
+                });
+              }
             }
           }
         }
       }
+      if (formattedContacts.length > 0) {
+        cachedFetchedContacts = formattedContacts;
+      }
+    } else if (cachedFetchedContacts.length > 0) {
+      formattedContacts = cachedFetchedContacts;
     }
 
     if (formattedContacts.length === 0) {
-      return { granted: true, totalFound: 0, synced: 0, message: 'No valid phone numbers' };
+      return { granted: true, totalFound: 0, synced: 0, message: 'No contacts found on device' };
     }
 
-    console.log(`📱 [ContactSync] Found ${formattedContacts.length} valid contacts with proper names. Syncing to DB...`);
+    console.log(`📱 [ContactSync] Found ${formattedContacts.length} valid contacts for ${cleanMobile}. Syncing to DB...`);
 
-    // 4. Send to Backend API
-    const baseUrl = getResolvedBaseUrl();
-    const response = await fetch(`${baseUrl}/contacts/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userMobile: cleanMobile,
-        userId: userId || null,
-        stage: stage,
-        contacts: formattedContacts,
-      }),
-    });
+    // 4. Send to Backend API with candidate URLs failover
+    const candidateUrls = getCandidateRootUrls();
+    let resJson: any = null;
 
-    const resJson = await response.json();
+    for (const rootUrl of candidateUrls) {
+      try {
+        const response = await fetch(`${rootUrl}/api/contacts/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userMobile: cleanMobile,
+            userId: userId || null,
+            stage: stage,
+            contacts: formattedContacts,
+          }),
+        });
+
+        if (response.ok) {
+          resJson = await response.json();
+          break;
+        }
+      } catch (reqErr) {
+        // Try next candidate URL
+      }
+    }
+
+    const inserted = resJson?.data?.inserted ?? 0;
     return {
       granted: true,
       totalFound: formattedContacts.length,
-      synced: resJson.data?.inserted || 0,
-      message: resJson.message || 'Contacts synced successfully',
+      synced: inserted,
+      message: resJson?.message || 'Contacts synced successfully',
     };
   } catch (error: any) {
     console.warn('ℹ️ [ContactSync Notice]:', error.message);

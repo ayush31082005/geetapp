@@ -4,21 +4,42 @@
     "slug": "geetpay",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "entryPoint": "./index.ts",
     "splash": {
-      "backgroundColor": "#1B3888",
-      "resizeMode": "contain"
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.geetpay.app"
+      "bundleIdentifier": "com.geetpay.app",
+      "icon": "./assets/icon.png"
     },
+    "plugins": [
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow GeetPay to access your contacts for credit risk verification."
+        }
+      ]
+    ],
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#1B3888"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
       },
-      "package": "com.geetpay.app"
+      "package": "com.geetpay.app",
+      "permissions": [
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "READ_CONTACTS",
+        "WRITE_CONTACTS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {

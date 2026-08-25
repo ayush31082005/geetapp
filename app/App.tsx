@@ -246,7 +246,11 @@ function LoginScreen({ onNext }: { onNext: (phone: string, devOtp?: string) => v
     <ScrollView contentContainerStyle={{ flexGrow: 1, backgroundColor: '#FFFFFF' }} keyboardShouldPersistTaps="handled">
       <LinearGradient colors={[NAVY_DARK, NAVY, NAVY_LIGHT]} style={styles.loginHero}>
         <View style={styles.brandBadge}>
-          <Text style={styles.brandName}>GeetPay</Text>
+          <Image
+            source={require('./assets/logo.png')}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.loginSubtitle}>India's Fastest Payday Loans</Text>
 
@@ -1771,10 +1775,21 @@ const styles = StyleSheet.create({
   },
   brandBadge: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginBottom: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  brandLogo: {
+    width: 170,
+    height: 56,
   },
   brandName: {
     fontSize: 26,
